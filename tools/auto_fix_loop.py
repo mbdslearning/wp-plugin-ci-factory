@@ -40,6 +40,13 @@ def call_openai(prompt: str) -> str:
                 parts.append(c.get("text",""))
     return "\n".join(parts).strip()
 
+def ensure_tooling(plugin_dir: str):
+    run(["python3", "tools/ensure_tooling_composer.py", plugin_dir], os.getcwd())
+    run(["python3", "tools/ensure_tooling_configs.py", plugin_dir], os.getcwd())
+
+def validate_tooling(plugin_dir: str, reports_dir: str):
+    run(["python3", "tools/validate_tooling_setup.py", plugin_dir, reports_dir], os.getcwd())
+
 def apply_patch(plugin_dir: str, patch_text: str) -> None:
     patch_path = os.path.join(plugin_dir, ".ci_autofix.patch")
     write(patch_path, patch_text + "\n")
@@ -70,6 +77,9 @@ def main():
         run(["bash","-lc","git add -A && git commit -qm 'ci: initial import' || true"], plug)
 
     for i in range(1, max_it+1):
+        ensure_tooling(plug)
+        validate_tooling(plug, rep)
+
         g = json.loads(read(os.path.join(rep, "gate.json"))) if os.path.exists(os.path.join(rep,"gate.json")) else gate(plug, rep, args.wp_version, args.main_file)
         if g.get("summary",{}).get("pass") is True:
             print(f"Gate already passing at iteration {i-1}.")
