@@ -1,0 +1,124 @@
+name: WP Plugin Comprehensive Gate (with optional autofix)
+
+on:
+  workflow_dispatch:
+    inputs:
+      plugin_zip_path:
+        description: "Path in repo to plugin zip (e.g. uploads/plugin.zip)"
+        required: true
+        type: string
+      max_iterations:
+        description: "Max autofix iterations (0 disables autofix)"
+        required: true
+        default: "3"
+        type: string
+      php_matrix:
+        description: "Comma-separated PHP versions"
+        required: true
+        default: "8.1,8.2,8.3"
+        type: string
+      wp_version:
+        description: "WordPress version for integration tests"
+        required: true
+        default: "latest"
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+  security-events: write
+  pull-requests: write
+
+concurrency:
+  group: wp-plugin-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse inputs
+        id: inp
+        run: |
+          echo "zip=${{ inputs.plugin_zip_path }}" >> $GITHUB_OUTPUT
+          echo "maxit=${{ inputs.max_iterations }}" >> $GITHUB_OUTPUT
+          echo "wpver=${{ inputs.wp_version }}" >> $GITHUB_OUTPUT
+          php_csv="${{ inputs.php_matrix }}"
+          php_json=$(python3 - << 'PY'
+import os, json
+csv = os.environ["PHP_CSV"]
+arr = [x.strip() for x in csv.split(",") if x.strip()]
+print(json.dumps(arr))
+PY
+          )
+          echo "php_json=$php_json" >> $GITHUB_OUTPUT
+        env:
+          PHP_CSV: ${{ inputs.php_matrix }}
+
+      - name: Install OS deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip subversion jq
+
+      - name: Prepare workspace
+        run: |
+          mkdir -p work uploads artifacts reports
+
+      - name: Unzip plugin
+        run: |
+          test -f "${{ steps.inp.outputs.zip }}" || (echo "Zip not found: ${{ steps.inp.outputs.zip }}" && exit 1)
+          unzip -q "${{ steps.inp.outputs.zip }}" -d work/plugin
+          # Flatten if zip contains a single top folder
+          python3 tools/flatten_plugin_dir.py work/plugin
+          ls -la work/plugin
+
+      - name: Detect main plugin file
+        id: main
+        run: |
+          python3 tools/detect_main_plugin.py work/plugin > reports/main.json
+          cat reports/main.json
+          echo "main_file=$(jq -r .main_file reports/main.json)" >> $GITHUB_OUTPUT
+
+      - name: Initialize composer tooling (dev-only)
+        run: |
+          python3 tools/ensure_tooling_composer.py work/plugin
+          (cd work/plugin && composer install --no-interaction --no-progress --prefer-dist --no-scripts)
+
+      - name: Run Quality Gate (produces reports/gate.json)
+        run: |
+          python3 tools/run_gate.py work/plugin reports --wp-version "${{ steps.inp.outputs.wpver }}" --main-file "${{ steps.main.outputs.main_file }}"
+
+      - name: Upload reports artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-reports
+          path: reports
+
+      - name: Auto-fix loop (optional)
+        if: ${{ steps.inp.outputs.maxit != '0' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          python3 tools/auto_fix_loop.py \
+            --plugin-dir work/plugin \
+            --reports-dir reports \
+            --max-it "${{ steps.inp.outputs.maxit }}" \
+            --wp-version "${{ steps.inp.outputs.wpver }}" \
+            --main-file "${{ steps.main.outputs.main_file }}"
+
+      - name: Package final plugin zip
+        if: always()
+        run: |
+          python3 tools/package_plugin.py work/plugin artifacts/final-plugin.zip
+
+      - name: Upload final plugin artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-plugin
+          path: artifacts/final-plugin.zip
