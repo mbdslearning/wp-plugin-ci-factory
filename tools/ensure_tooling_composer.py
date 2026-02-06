@@ -1,36 +1,79 @@
-import os, json, sys
+import os, json, argparse
+from tooling_requirements import REQ_DEV, OPTIONAL_DEV, OPTIONAL_ALLOW_PLUGIN
 
-plugin_dir = sys.argv[1]
-path = os.path.join(plugin_dir, "composer.json")
+TEMPLATE = "templates/composer.devtools.json"
 
-default = {
-  "name": "ci/wp-plugin",
-  "type": "project",
-  "require": {},
-  "require-dev": {
-    "phpunit/phpunit": "^9.6",
-    "yoast/phpunit-polyfills": "^3.0",
-    "squizlabs/php_codesniffer": "^3.10",
-    "wp-coding-standards/wpcs": "^3.1",
-    "phpstan/phpstan": "^1.11",
-    "szepeviktor/phpstan-wordpress": "^1.3",
-    "vimeo/psalm": "^5.26",
-    "semgrep/semgrep": "^1.94"
-  },
-  "scripts": {
-    "lint": "find . -type f -name \"*.php\" -not -path \"./vendor/*\" -print0 | xargs -0 -n1 -P4 php -l",
-    "phpcs": "phpcs -q --report=full",
-    "phpstan": "phpstan analyse --no-progress",
-    "psalm": "psalm --no-progress",
-    "audit": "composer audit --no-interaction"
-  },
-  "config": {
-    "allow-plugins": {
-      "dealerdirect/phpcodesniffer-composer-installer": True
-    }
-  }
-}
+def load_json(path):
+    return json.loads(open(path, "r", encoding="utf-8").read())
 
-if not os.path.exists(path):
+def save_json(path, data):
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(default, f, indent=2)
+        json.dump(data, f, indent=2)
+        f.write("\n")
+
+def deep_get(d, *keys, default=None):
+    cur = d
+    for k in keys:
+        if not isinstance(cur, dict) or k not in cur:
+            return default
+        cur = cur[k]
+    return cur
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("plugin_dir")
+    args = ap.parse_args()
+
+    plugin_dir = os.path.abspath(args.plugin_dir)
+    path = os.path.join(plugin_dir, "composer.json")
+    changed = False
+
+    if not os.path.exists(path):
+        data = load_json(os.path.join(os.getcwd(), TEMPLATE))
+        save_json(path, data)
+        print("created composer.json")
+        return
+
+    data = load_json(path)
+
+    data.setdefault("require", {})
+    data.setdefault("require-dev", {})
+    data.setdefault("scripts", {})
+    data.setdefault("config", {})
+    data["config"].setdefault("allow-plugins", {})
+
+    # Ensure required dev deps
+    for pkg, ver in REQ_DEV.items():
+        if pkg not in data["require-dev"]:
+            data["require-dev"][pkg] = ver
+            changed = True
+
+    # Ensure optional dev deps
+    for pkg, ver in OPTIONAL_DEV.items():
+        if pkg not in data["require-dev"]:
+            data["require-dev"][pkg] = ver
+            changed = True
+
+    # Ensure allow-plugins for the optional installer
+    allow_plugins = data["config"]["allow-plugins"]
+    if allow_plugins.get(OPTIONAL_ALLOW_PLUGIN) is not True:
+        allow_plugins[OPTIONAL_ALLOW_PLUGIN] = True
+        changed = True
+
+    # Ensure scripts exist (do not overwrite if user customized)
+    data["scripts"].setdefault(
+        "lint",
+        "find . -type f -name \"*.php\" -not -path \"./vendor/*\" -print0 | xargs -0 -n1 -P4 php -l"
+    )
+    data["scripts"].setdefault("phpcs", "phpcs -q --standard=phpcs.xml.dist")
+    data["scripts"].setdefault("phpcbf", "phpcbf --standard=phpcs.xml.dist")
+    data["scripts"].setdefault("phpstan", "phpstan analyse --no-progress --configuration=phpstan.neon.dist")
+
+    if changed:
+        save_json(path, data)
+        print("updated composer.json")
+    else:
+        print("no_change")
+
+if __name__ == "__main__":
+    main()
