@@ -92,6 +92,16 @@ PY
         run: |
           python3 tools/run_gate.py work/plugin reports --wp-version "${{ steps.inp.outputs.wpver }}" --main-file "${{ steps.main.outputs.main_file }}"
 
+      - name: Semgrep (SARIF for Code Scanning)
+        run: |
+          (cd work/plugin && vendor/bin/semgrep --config p/php --sarif --output ../../reports/semgrep.sarif --metrics=off .) || true
+
+      - name: Upload Semgrep SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/semgrep.sarif
+
       - name: Upload reports artifact
         if: always()
         uses: actions/upload-artifact@v4
