@@ -83,6 +83,19 @@ PY
           cat reports/main.json
           echo "main_file=$(jq -r .main_file reports/main.json)" >> $GITHUB_OUTPUT
 
+      - name: Ensure tooling files (composer + configs)
+        run: |
+          python3 tools/ensure_tooling_composer.py work/plugin
+          python3 tools/ensure_tooling_configs.py work/plugin
+
+      - name: Validate tooling setup (presence + correctness)
+        run: |
+          python3 tools/validate_tooling_setup.py work/plugin reports
+
+      - name: Install tooling dependencies
+        run: |
+          (cd work/plugin && composer install --no-interaction --no-progress --prefer-dist --no-scripts)
+
       - name: Initialize composer tooling (dev-only)
         run: |
           python3 tools/ensure_tooling_composer.py work/plugin
