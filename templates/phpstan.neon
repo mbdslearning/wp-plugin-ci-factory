@@ -1,0 +1,11 @@
+parameters:
+  level: 5
+  paths:
+    - .
+  excludePaths:
+    - vendor
+  checkMissingIterableValueType: false
+  checkGenericClassInNonGenericObjectType: false
+
+includes:
+  - vendor/szepeviktor/phpstan-wordpress/extension.neon
