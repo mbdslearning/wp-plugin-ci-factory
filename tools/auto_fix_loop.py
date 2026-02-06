@@ -47,6 +47,10 @@ def ensure_tooling(plugin_dir: str):
 def validate_tooling(plugin_dir: str, reports_dir: str):
     run(["python3", "tools/validate_tooling_setup.py", plugin_dir, reports_dir], os.getcwd())
 
+def run_tooling(plugin_dir: str, reports_dir: str) -> None:
+    # Writes reports/tooling-run.json + raw outputs
+    run(["python3", "tools/run_tooling.py", plugin_dir, reports_dir], os.getcwd())
+
 def apply_patch(plugin_dir: str, patch_text: str) -> None:
     patch_path = os.path.join(plugin_dir, ".ci_autofix.patch")
     write(patch_path, patch_text + "\n")
@@ -79,6 +83,7 @@ def main():
     for i in range(1, max_it+1):
         ensure_tooling(plug)
         validate_tooling(plug, rep)
+        run_tooling(plug, rep)
 
         g = json.loads(read(os.path.join(rep, "gate.json"))) if os.path.exists(os.path.join(rep,"gate.json")) else gate(plug, rep, args.wp_version, args.main_file)
         if g.get("summary",{}).get("pass") is True:
