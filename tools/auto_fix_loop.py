@@ -91,11 +91,15 @@ def main():
             return
 
         # Build a compact “evidence bundle”
+        tooling_json = read(os.path.join(rep, "tooling.json"))[:12000]
+        tooling_run = read(os.path.join(rep, "tooling-run.json"))[:12000]
+        composer_validate = read(os.path.join(rep, "composer-validate.txt"))[:12000]
+        
+        lint = read(os.path.join(rep, "php-lint.txt"))[:12000]
         phpcs = read(os.path.join(rep, "phpcs.txt"))[:12000]
         phpstan = read(os.path.join(rep, "phpstan.txt"))[:12000]
-        semgrep = read(os.path.join(rep, "semgrep.txt"))[:12000]
         phpunit = read(os.path.join(rep, "phpunit.txt"))[:12000]
-        lint = read(os.path.join(rep, "php-lint.txt"))[:12000]
+        semgrep = read(os.path.join(rep, "semgrep.txt"))[:12000]
 
         prompt = f"""
 You are a senior WordPress plugin engineer. Produce a SINGLE unified diff patch that fixes issues.
