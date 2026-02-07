@@ -1,0 +1,9 @@
+name: "WP Plugin CodeQL Config"
+queries:
+  - uses: security-extended
+  - uses: security-and-quality
+paths-ignore:
+  - vendor/**
+  - node_modules/**
+  - dist/**
+  - build/**
