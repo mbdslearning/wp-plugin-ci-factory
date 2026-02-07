@@ -1,10 +1,10 @@
-name: WP Plugin Comprehensive Gate (chunked upload + optional autofix)
+name: WP Plugin Comprehensive Gate (auditable factory)
 
 on:
   workflow_dispatch:
     inputs:
       plugin_zip_path:
-        description: "Path in repo to plugin zip (default: uploads/plugin.zip). If chunked parts exist, workflow will assemble first."
+        description: "Path in repo to plugin zip (e.g. uploads/plugin.zip)"
         required: true
         default: "uploads/plugin.zip"
         type: string
@@ -14,7 +14,7 @@ on:
         default: "3"
         type: string
       php_matrix:
-        description: "Comma-separated PHP versions (informational unless you add matrix strategy)"
+        description: "Comma-separated PHP versions (informational unless you add matrix)"
         required: true
         default: "8.1,8.2,8.3"
         type: string
@@ -69,19 +69,7 @@ jobs:
       - name: Prepare workspace
         run: |
           mkdir -p work uploads artifacts reports
-
-      - name: Assemble plugin zip from parts (if needed)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ls uploads/plugin.zip.part* 1> /dev/null 2>&1; then
-            echo "Found chunked zip parts. Reassembling to uploads/plugin.zip..."
-            rm -f uploads/plugin.zip
-            cat uploads/plugin.zip.part* > uploads/plugin.zip
-            ls -lh uploads/plugin.zip
-          else
-            echo "No zip parts found. Using plugin zip path as-is."
-          fi
+          echo "reports placeholder (ensures artifact exists)" > reports/.keep
 
       - name: Validate plugin zip exists
         shell: bash
@@ -134,12 +122,20 @@ jobs:
             --wp-version "${{ inputs.wp_version }}" \
             --main-file "${{ steps.main.outputs.main_file }}"
 
+      - name: Debug: list reports contents
+        if: always()
+        run: |
+          echo "=== reports tree ==="
+          find reports -maxdepth 3 -type f -print -exec ls -lh {} \;
+
       - name: Upload reports artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gate-reports
-          path: reports
+          path: reports/**
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Auto-fix loop (optional)
         if: ${{ inputs.max_iterations != '0' }}
@@ -165,6 +161,7 @@ jobs:
         if: always()
         run: |
           python3 tools/package_plugin.py work/plugin artifacts/final-plugin.zip
+          ls -lh artifacts/final-plugin.zip || true
 
       - name: Upload final plugin artifact
         if: always()
@@ -172,6 +169,8 @@ jobs:
         with:
           name: final-plugin
           path: artifacts/final-plugin.zip
+          if-no-files-found: warn
+          retention-days: 7
 
   gate_debug:
     if: ${{ inputs.run_debug_variant == 'true' }}
@@ -204,19 +203,7 @@ jobs:
       - name: Prepare workspace
         run: |
           mkdir -p work uploads artifacts reports
-
-      - name: Assemble plugin zip from parts (if needed)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ls uploads/plugin.zip.part* 1> /dev/null 2>&1; then
-            echo "Found chunked zip parts. Reassembling to uploads/plugin.zip..."
-            rm -f uploads/plugin.zip
-            cat uploads/plugin.zip.part* > uploads/plugin.zip
-            ls -lh uploads/plugin.zip
-          else
-            echo "No zip parts found. Using plugin zip path as-is."
-          fi
+          echo "reports placeholder (debug variant)" > reports/.keep
 
       - name: Validate plugin zip exists
         shell: bash
@@ -274,4 +261,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: gate-reports-debug
-          path: reports
+          path: reports/**
+          if-no-files-found: warn
+          retention-days: 7
