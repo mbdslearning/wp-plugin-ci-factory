@@ -1,27 +1,27 @@
-import os, re, json, sys
+import os, sys, json, re
 
-plugin_dir = sys.argv[1]
-header_re = re.compile(r"^\s*Plugin Name:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+PLUGIN_HEADER_RE = re.compile(r'^\s*Plugin\s+Name\s*:\s*(.+)$', re.IGNORECASE | re.MULTILINE)
 
-best = None
-for dirpath, _, filenames in os.walk(plugin_dir):
-    for fn in filenames:
-        if not fn.lower().endswith(".php"):
-            continue
-        p = os.path.join(dirpath, fn)
-        try:
-            s = open(p, "r", encoding="utf-8", errors="ignore").read(8192)
-        except Exception:
-            continue
-        if header_re.search(s):
-            # prefer root-level php
-            score = 0
-            rel = os.path.relpath(p, plugin_dir)
-            if os.path.dirname(rel) == ".":
-                score += 10
-            score += max(0, 5 - rel.count(os.sep))
-            if best is None or score > best[0]:
-                best = (score, rel)
+def find_main(plugin_dir: str) -> str:
+    candidates = []
+    for root, _, files in os.walk(plugin_dir):
+        for fn in files:
+            if not fn.lower().endswith('.php'):
+                continue
+            path = os.path.join(root, fn)
+            try:
+                data = open(path, 'r', encoding='utf-8', errors='ignore').read(4096)
+            except Exception:
+                continue
+            if PLUGIN_HEADER_RE.search(data):
+                rel = os.path.relpath(path, plugin_dir).replace('\\','/')
+                candidates.append(rel)
+    # Prefer top-level
+    candidates.sort(key=lambda p: (p.count('/'), len(p)))
+    return candidates[0] if candidates else ""
 
-out = {"main_file": best[1] if best else ""}
-print(json.dumps(out))
+if __name__ == "__main__":
+    plugin_dir = sys.argv[1]
+    main_file = find_main(plugin_dir)
+    out = {"main_file": main_file}
+    sys.stdout.write(json.dumps(out, indent=2))

@@ -1,79 +1,83 @@
-import os, json, argparse
-from tooling_requirements import REQ_DEV, OPTIONAL_DEV, OPTIONAL_ALLOW_PLUGIN
+import os, sys, json, textwrap
 
-TEMPLATE = "templates/composer.devtools.json"
+COMPOSER_JSON = {
+  "name": "ci-factory/plugin-dev-tooling",
+  "description": "Dev-only tooling for WP plugin CI (not required at runtime).",
+  "type": "project",
+  "license": "proprietary",
+  "require": {},
+  "require-dev": {
+    "phpunit/phpunit": "^10.5",
+    "squizlabs/php_codesniffer": "^3.10",
+    "wp-coding-standards/wpcs": "^3.0",
+    "phpstan/phpstan": "^1.11",
+    "szepeviktor/phpstan-wordpress": "^1.3",
+    "dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "lint": "php -d display_errors=1 -l $(find . -type f -name '*.php' -not -path './vendor/*')",
+    "phpcs": "phpcs -q",
+    "phpstan": "phpstan analyse"
+  }
+}
 
-def load_json(path):
-    return json.loads(open(path, "r", encoding="utf-8").read())
+PHPCS_XML = """<?xml version=\"1.0\"?>
+<ruleset name="WP Plugin CI">
+  <description>WPCS ruleset for CI</description>
 
-def save_json(path, data):
+  <config name="installed_paths" value="vendor/wp-coding-standards/wpcs"/>
+  <arg name="extensions" value="php"/>
+  <arg name="colors"/>
+  <arg value="ps"/>
+
+  <exclude-pattern>vendor/*</exclude-pattern>
+  <exclude-pattern>node_modules/*</exclude-pattern>
+  <exclude-pattern>tests/*</exclude-pattern>
+
+  <rule ref="WordPress-Core"/>
+  <rule ref="WordPress-Extra"/>
+  <rule ref="WordPress-Docs"/>
+</ruleset>
+"""
+
+PHPSTAN_NEON = """parameters:
+  level: 6
+  paths:
+    - .
+  excludePaths:
+    - vendor
+    - node_modules
+    - tests
+  scanFiles: []
+  tmpDir: /tmp/phpstan
+includes:
+  - vendor/szepeviktor/phpstan-wordpress/extension.neon
+"""
+
+def ensure_file(path: str, content: str) -> None:
+    if os.path.exists(path):
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-
-def deep_get(d, *keys, default=None):
-    cur = d
-    for k in keys:
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+        f.write(content)
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("plugin_dir")
-    args = ap.parse_args()
+    plugin_dir = sys.argv[1]
+    comp = os.path.join(plugin_dir, "composer.json")
+    if not os.path.exists(comp):
+        with open(comp, "w", encoding="utf-8") as f:
+            json.dump(COMPOSER_JSON, f, indent=2)
+            f.write("\n")
 
-    plugin_dir = os.path.abspath(args.plugin_dir)
-    path = os.path.join(plugin_dir, "composer.json")
-    changed = False
-
-    if not os.path.exists(path):
-        data = load_json(os.path.join(os.getcwd(), TEMPLATE))
-        save_json(path, data)
-        print("created composer.json")
-        return
-
-    data = load_json(path)
-
-    data.setdefault("require", {})
-    data.setdefault("require-dev", {})
-    data.setdefault("scripts", {})
-    data.setdefault("config", {})
-    data["config"].setdefault("allow-plugins", {})
-
-    # Ensure required dev deps
-    for pkg, ver in REQ_DEV.items():
-        if pkg not in data["require-dev"]:
-            data["require-dev"][pkg] = ver
-            changed = True
-
-    # Ensure optional dev deps
-    for pkg, ver in OPTIONAL_DEV.items():
-        if pkg not in data["require-dev"]:
-            data["require-dev"][pkg] = ver
-            changed = True
-
-    # Ensure allow-plugins for the optional installer
-    allow_plugins = data["config"]["allow-plugins"]
-    if allow_plugins.get(OPTIONAL_ALLOW_PLUGIN) is not True:
-        allow_plugins[OPTIONAL_ALLOW_PLUGIN] = True
-        changed = True
-
-    # Ensure scripts exist (do not overwrite if user customized)
-    data["scripts"].setdefault(
-        "lint",
-        "find . -type f -name \"*.php\" -not -path \"./vendor/*\" -print0 | xargs -0 -n1 -P4 php -l"
-    )
-    data["scripts"].setdefault("phpcs", "phpcs -q --standard=phpcs.xml.dist")
-    data["scripts"].setdefault("phpcbf", "phpcbf --standard=phpcs.xml.dist")
-    data["scripts"].setdefault("phpstan", "phpstan analyse --no-progress --configuration=phpstan.neon.dist")
-
-    if changed:
-        save_json(path, data)
-        print("updated composer.json")
-    else:
-        print("no_change")
+    ensure_file(os.path.join(plugin_dir, "phpcs.xml.dist"), PHPCS_XML)
+    ensure_file(os.path.join(plugin_dir, "phpstan.neon.dist"), PHPSTAN_NEON)
+    # phpunit.xml.dist and tests/bootstrap.php are handled by ensure_wp_integration_scaffold.py
 
 if __name__ == "__main__":
     main()

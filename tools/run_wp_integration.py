@@ -26,12 +26,15 @@ def main():
 
     summary = {"timestamp": int(time.time()), "install": {}, "phpunit": {}}
 
+    env = os.environ.copy()
+    # propagate WP_DEBUG / SCRIPT_DEBUG from env if set by workflow step
     installer = os.path.join(plug, "bin", "install-wp-tests.sh")
     if os.path.exists(installer):
         os.chmod(installer, 0o755)
         rc, out = run(
             ["bash", "-lc", f"bin/install-wp-tests.sh {args.db_name} {args.db_user} {args.db_pass} {args.db_host} {args.wp_version} true"],
-            cwd=plug
+            cwd=plug,
+            env=env
         )
         write(os.path.join(rep, "wp-tests-install.txt"), out)
         summary["install"] = {"rc": rc, "output": "wp-tests-install.txt"}
@@ -39,9 +42,8 @@ def main():
         write(os.path.join(rep, "wp-tests-install.txt"), "Missing bin/install-wp-tests.sh\n")
         summary["install"] = {"rc": 2, "output": "wp-tests-install.txt", "error": "missing_installer"}
 
-    # Run PHPUnit if phpunit.xml.dist exists
     if os.path.exists(os.path.join(plug, "phpunit.xml.dist")):
-        rc, out = run(["bash", "-lc", "vendor/bin/phpunit --configuration phpunit.xml.dist"], cwd=plug)
+        rc, out = run(["bash", "-lc", "vendor/bin/phpunit --configuration phpunit.xml.dist"], cwd=plug, env=env)
         write(os.path.join(rep, "phpunit.txt"), out)
         summary["phpunit"] = {"rc": rc, "output": "phpunit.txt"}
     else:
@@ -51,7 +53,6 @@ def main():
     write(os.path.join(rep, "wp-integration-run.json"), json.dumps(summary, indent=2))
     print(json.dumps(summary, indent=2))
 
-    # Fail if installer or phpunit failed
     if summary["install"]["rc"] != 0 or summary["phpunit"]["rc"] != 0:
         raise SystemExit(1)
 

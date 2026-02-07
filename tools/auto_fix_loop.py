@@ -1,78 +1,55 @@
-import os, sys, json, argparse, subprocess, time, re, textwrap
+import os, argparse, json, subprocess, time, re
+import requests
 
-def run(cmd, cwd, timeout=1800):
+def run(cmd, cwd, timeout=3600):
     p = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=timeout)
     return p.returncode, p.stdout
 
-def read(p):
-    return open(p, "r", encoding="utf-8", errors="ignore").read() if os.path.exists(p) else ""
+def read(path):
+    if not os.path.exists(path):
+        return ""
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        return f.read()
 
-def read_clip(path: str, limit: int = 12000) -> str:
+def read_clip(path, limit=12000):
     return read(path)[:limit]
 
-def write(p, s):
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    open(p, "w", encoding="utf-8").write(s)
+def write(path, s):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(s)
+
+def apply_unified_diff(plugin_dir: str, diff_text: str) -> None:
+    # Apply patch using git apply-like behavior (requires plugin_dir is a git worktree? not necessarily).
+    # We implement a minimal "applypatch" via `patch -p1` with working dir plugin_dir.
+    p = subprocess.run(["bash","-lc","patch -p1 --forward --batch"], cwd=plugin_dir, input=diff_text, text=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode != 0:
+        raise RuntimeError("patch failed:\n" + p.stdout)
 
 def call_openai(prompt: str) -> str:
-    # Minimal REST call (no extra deps). Expects OPENAI_API_KEY present.
-    import urllib.request, json
-    key = os.environ.get("OPENAI_API_KEY","")
-    if not key:
-        raise SystemExit("OPENAI_API_KEY missing")
-    body = {
-      "model": "gpt-5.2-thinking",
-      "input": prompt
+    api_key = os.environ.get("OPENAI_API_KEY","").strip()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is missing")
+    model = os.environ.get("OPENAI_MODEL","").strip() or "gpt-4.1-mini"
+    url = "https://api.openai.com/v1/responses"
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {
+        "model": model,
+        "input": prompt,
+        "temperature": 0.1
     }
-    req = urllib.request.Request(
-      "https://api.openai.com/v1/responses",
-      data=json.dumps(body).encode("utf-8"),
-      headers={
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json"
-      },
-      method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    # Extract text output
-    parts = []
+    r = requests.post(url, headers=headers, json=payload, timeout=120)
+    if r.status_code >= 300:
+        raise RuntimeError(f"OpenAI API error {r.status_code}: {r.text[:1000]}")
+    data = r.json()
+    # Extract text
+    out = []
     for item in data.get("output", []):
         for c in item.get("content", []):
             if c.get("type") == "output_text":
-                parts.append(c.get("text",""))
-    return "\n".join(parts).strip()
-
-def ensure_tooling(plugin_dir: str):
-    run(["python3", "tools/ensure_tooling_composer.py", plugin_dir], os.getcwd())
-    run(["python3", "tools/ensure_tooling_configs.py", plugin_dir], os.getcwd())
-
-def validate_tooling(plugin_dir: str, reports_dir: str):
-    run(["python3", "tools/validate_tooling_setup.py", plugin_dir, reports_dir], os.getcwd())
-
-def run_tooling(plugin_dir: str, reports_dir: str) -> None:
-    # Writes reports/tooling-run.json + raw outputs
-    run(["python3", "tools/run_tooling.py", plugin_dir, reports_dir], os.getcwd())
-
-def ensure_wp_integration(plugin_dir: str, main_file: str) -> None:
-    run(["python3", "tools/ensure_wp_integration_scaffold.py", plugin_dir, "--main-file", main_file], os.getcwd())
-
-def validate_wp_integration(plugin_dir: str, reports_dir: str, main_file: str) -> None:
-    run(["python3", "tools/validate_wp_integration_scaffold.py", plugin_dir, reports_dir, "--main-file", main_file], os.getcwd())
-
-def run_wp_integration(plugin_dir: str, reports_dir: str, wp_version: str) -> None:
-    run(["python3", "tools/run_wp_integration.py", plugin_dir, reports_dir, "--wp-version", wp_version], os.getcwd())
-
-def apply_patch(plugin_dir: str, patch_text: str) -> None:
-    patch_path = os.path.join(plugin_dir, ".ci_autofix.patch")
-    write(patch_path, patch_text + "\n")
-    rc, out = run(["bash","-lc", f"git apply --whitespace=fix {patch_path}"], plugin_dir)
-    if rc != 0:
-        raise RuntimeError("Failed to apply patch:\n" + out)
-
-def gate(plugin_dir: str, reports_dir: str, wp_version: str, main_file: str) -> dict:
-    rc, out = run(["python3","tools/run_gate.py", plugin_dir, reports_dir, "--wp-version", wp_version, "--main-file", main_file], os.getcwd())
-    return json.loads(read(os.path.join(reports_dir, "gate.json")))
+                out.append(c.get("text",""))
+    return "\n".join(out).strip()
 
 def main():
     ap = argparse.ArgumentParser()
@@ -80,110 +57,89 @@ def main():
     ap.add_argument("--reports-dir", required=True)
     ap.add_argument("--max-it", required=True)
     ap.add_argument("--wp-version", default="latest")
-    ap.add_argument("--main-file", default="")
+    ap.add_argument("--main-file", required=True)
     args = ap.parse_args()
 
     plug = os.path.abspath(args.plugin_dir)
     rep = os.path.abspath(args.reports_dir)
     max_it = int(args.max_it)
 
-    # init git so we can apply patches cleanly and commit
-    if not os.path.exists(os.path.join(plug, ".git")):
-        run(["bash","-lc","git init -q"], plug)
-        run(["bash","-lc","git add -A && git commit -qm 'ci: initial import' || true"], plug)
-
     for i in range(1, max_it+1):
-        ensure_tooling(plug)
-        validate_tooling(plug, rep)
-        run_tooling(plug, rep)
-        
-        ensure_wp_integration(plug, args.main_file)
-        validate_wp_integration(plug, rep, args.main_file)
-        run_wp_integration(plug, rep, args.wp_version)
+        # Ensure WP integration scaffold and run integration tests each iteration
+        run(["bash","-lc", f"python3 {os.path.abspath('tools/ensure_wp_integration_scaffold.py')} {plug} --main-file '{args.main_file}'"], os.getcwd())
+        run(["bash","-lc", f"python3 {os.path.abspath('tools/validate_wp_integration_scaffold.py')} {plug} {rep} --main-file '{args.main_file}'"], os.getcwd())
+        run(["bash","-lc", f"python3 {os.path.abspath('tools/run_wp_integration.py')} {plug} {rep} --wp-version '{args.wp_version}'"], os.getcwd())
 
-        g = json.loads(read(os.path.join(rep, "gate.json"))) if os.path.exists(os.path.join(rep,"gate.json")) else gate(plug, rep, args.wp_version, args.main_file)
-        if g.get("summary",{}).get("pass") is True:
-            print(f"Gate already passing at iteration {i-1}.")
+        # Run gate
+        rc, out = run(["bash","-lc", f"python3 {os.path.abspath('tools/run_gate.py')} {plug} {rep} --wp-version '{args.wp_version}' --main-file '{args.main_file}'"], os.getcwd())
+        write(os.path.join(rep, f"gate-iter-{i}.txt"), out)
+
+        gate_json = read(os.path.join(rep, "gate.json"))
+        try:
+            g = json.loads(gate_json) if gate_json else {}
+        except Exception:
+            g = {}
+        passed = bool(g.get("summary", {}).get("pass"))
+        if passed:
+            print(f"Gate passing at iteration {i}.")
             return
 
-        # Build a compact “evidence bundle”
-        tooling_json = read_clip(os.path.join(rep, "tooling.json"))
-        tooling_run = read_clip(os.path.join(rep, "tooling-run.json"))
-        composer_validate = read_clip(os.path.join(rep, "composer-validate.txt"))
-
+        # Evidence for patching
         lint = read_clip(os.path.join(rep, "php-lint.txt"))
         phpcs = read_clip(os.path.join(rep, "phpcs.txt"))
         phpstan = read_clip(os.path.join(rep, "phpstan.txt"))
         phpunit = read_clip(os.path.join(rep, "phpunit.txt"))
-        semgrep = read_clip(os.path.join(rep, "semgrep.txt"))
-        
         wp_integration = read_clip(os.path.join(rep, "wp-integration.json"))
         wp_integration_run = read_clip(os.path.join(rep, "wp-integration-run.json"))
         wp_tests_install = read_clip(os.path.join(rep, "wp-tests-install.txt"))
+        gate = read_clip(os.path.join(rep, "gate.json"))
 
-        prompt = f"""
-You are a senior WordPress plugin engineer. Produce a SINGLE unified diff patch that fixes issues.
+        prompt = f"""You are a senior WordPress plugin engineer.
+
+Task:
+- Produce ONE unified diff patch (git apply compatible) that fixes the reported problems.
 Rules:
-- Output ONLY a unified diff (git apply compatible). No commentary.
-- Prefer minimal safe changes.
-- Do not add new dependencies unless necessary.
-- Preserve backwards compatibility and production readiness.
+- Output ONLY the unified diff. No commentary.
+- Prefer minimal, safe changes.
+- Do not add runtime deps; dev-only changes are OK.
+- Preserve backwards compatibility where reasonable.
 - Fix security issues first.
+- Fix WP integration scaffold/tests if failing.
 
-CI evidence:
-
-Tooling setup validation (tooling.json):
-{tooling_json}
-
-Tooling run summary (tooling-run.json):
-{tooling_run}
-
-Composer validate:
-{composer_validate}
-
-PHP lint:
-{lint}
-
-PHPCS:
-{phpcs}
-
-PHPStan:
-{phpstan}
-
-PHPUnit:
-{phpunit}
-
-wp-integration scaffold validation:
+Evidence:
+[wp-integration scaffold]
 {wp_integration}
 
-wp-integration run summary:
+[wp-integration run]
 {wp_integration_run}
 
-wp-tests install log:
+[wp-tests install]
 {wp_tests_install}
 
-Semgrep:
-{semgrep}
+[php-lint]
+{lint}
 
-Repo structure: this is a WordPress plugin. Main plugin file: {args.main_file}
+[phpcs]
+{phpcs}
+
+[phpstan]
+{phpstan}
+
+[phpunit]
+{phpunit}
+
+[gate.json]
+{gate}
 """
 
-        patch = call_openai(prompt)
-        if "diff --git" not in patch:
-            raise RuntimeError("Model did not return a unified diff.")
+        diff = call_openai(prompt)
+        if not diff.strip().startswith("diff --git"):
+            raise RuntimeError("Model did not return a unified diff")
+        apply_unified_diff(plug, diff)
+        write(os.path.join(rep, f"autofix-diff-{i}.patch"), diff)
 
-        apply_patch(plug, patch)
-        # commit
-        run(["bash","-lc", f"git add -A && git commit -m 'ci: autofix iteration {i}' || true"], plug)
-
-        # re-run gate
-        g2 = gate(plug, rep, args.wp_version, args.main_file)
-        if g2.get("summary",{}).get("pass") is True:
-            print(f"Gate passing after iteration {i}.")
-            return
-
-    print(f"Reached max iterations ({max_it}) without fully passing.")
-    sys.exit(1)
+    print("Max iterations reached; gate still failing.")
+    raise SystemExit(2)
 
 if __name__ == "__main__":
     main()

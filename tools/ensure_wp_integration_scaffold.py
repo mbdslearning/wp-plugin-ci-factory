@@ -1,4 +1,4 @@
-import os, argparse, stat
+import os, argparse, stat, re
 
 PHPUNIT_XML = """<?xml version="1.0"?>
 <phpunit
@@ -24,8 +24,6 @@ PHPUNIT_XML = """<?xml version="1.0"?>
 INSTALL_WP_TESTS_SH = r"""#!/usr/bin/env bash
 set -euo pipefail
 
-# Usage:
-#   bin/install-wp-tests.sh <db-name> <db-user> <db-pass> <db-host> [wp-version] [skip-db-create]
 DB_NAME="${1:-wordpress_test}"
 DB_USER="${2:-root}"
 DB_PASS="${3:-}"
@@ -106,11 +104,6 @@ create_db() {
   "
 }
 
-echo "WP_VERSION=${WP_VERSION}"
-echo "WP_CORE_DIR=${WP_CORE_DIR}"
-echo "WP_TESTS_DIR=${WP_TESTS_DIR}"
-echo "DB_HOST=${DB_HOST}, DB_NAME=${DB_NAME}, DB_USER=${DB_USER}"
-
 install_wp_core
 install_wp_tests
 create_db
@@ -120,11 +113,8 @@ echo "Done."
 TEST_PLUGIN_LOADS = """<?php
 
 class Test_Plugin_Loads extends WP_UnitTestCase {
-
     public function test_plugin_loaded() {
         $this->assertTrue( defined('ABSPATH') );
-
-        // Replace with something your plugin defines if you want stricter checks:
         $this->assertTrue(true);
     }
 }
@@ -142,7 +132,6 @@ if (! $_tests_dir) {
 
 require_once $_tests_dir . '/includes/functions.php';
 
-// Enable debug flags when requested by CI (matrix sets WP_DEBUG=1, SCRIPT_DEBUG=1).
 if (getenv('WP_DEBUG') === '1') {
     if (! defined('WP_DEBUG')) define('WP_DEBUG', true);
     if (! defined('WP_DEBUG_DISPLAY')) define('WP_DEBUG_DISPLAY', true);
@@ -152,9 +141,6 @@ if (getenv('SCRIPT_DEBUG') === '1') {
     if (! defined('SCRIPT_DEBUG')) define('SCRIPT_DEBUG', true);
 }
 
-/**
- * Load the plugin being tested.
- */
 function _manually_load_plugin() {
     require dirname(__DIR__) . '/{MAIN_FILE}';
 }
@@ -191,29 +177,20 @@ def has_any_tests(tests_dir: str) -> bool:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("plugin_dir")
-    ap.add_argument("--main-file", required=True, help="Main plugin file relative to plugin root (e.g. my-plugin.php)")
+    ap.add_argument("--main-file", required=True)
     args = ap.parse_args()
 
     plug = os.path.abspath(args.plugin_dir)
     main_file = args.main_file.strip().lstrip("/")
 
     changed = False
-
-    # phpunit.xml.dist
     changed |= write_if_missing(os.path.join(plug, "phpunit.xml.dist"), PHPUNIT_XML)
+    changed |= write_if_missing(os.path.join(plug, "tests", "bootstrap.php"), BOOTSTRAP_TEMPLATE.replace("{MAIN_FILE}", main_file))
+    inst = os.path.join(plug, "bin", "install-wp-tests.sh")
+    changed |= write_if_missing(inst, INSTALL_WP_TESTS_SH)
+    changed |= ensure_executable(inst)
 
-    # tests/bootstrap.php
-    bootstrap_content = BOOTSTRAP_TEMPLATE.replace("{MAIN_FILE}", main_file)
-    changed |= write_if_missing(os.path.join(plug, "tests", "bootstrap.php"), bootstrap_content)
-
-    # bin/install-wp-tests.sh
-    inst_path = os.path.join(plug, "bin", "install-wp-tests.sh")
-    changed |= write_if_missing(inst_path, INSTALL_WP_TESTS_SH)
-    changed |= ensure_executable(inst_path)
-
-    # minimal test
-    tests_dir = os.path.join(plug, "tests")
-    if not has_any_tests(tests_dir):
+    if not has_any_tests(os.path.join(plug, "tests")):
         changed |= write_if_missing(os.path.join(plug, "tests", "test-plugin-loads.php"), TEST_PLUGIN_LOADS)
 
     print("changed" if changed else "no_change")

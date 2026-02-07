@@ -1,20 +1,19 @@
-import os, sys, zipfile, pathlib
+import os, sys, zipfile
 
-plugin_dir = sys.argv[1]
-zip_path = sys.argv[2]
+def zipdir(src, dest_zip):
+    with zipfile.ZipFile(dest_zip, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        for root, _, files in os.walk(src):
+            for fn in files:
+                path = os.path.join(root, fn)
+                rel = os.path.relpath(path, src)
+                if rel.startswith("vendor/") or rel.startswith(".git/"):
+                    # keep vendor in final? Usually NO for WP plugins. Skip.
+                    continue
+                z.write(path, rel)
 
-plugin_dir = os.path.abspath(plugin_dir)
-os.makedirs(os.path.dirname(zip_path), exist_ok=True)
-
-with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
-    for p in pathlib.Path(plugin_dir).rglob("*"):
-        if p.is_dir():
-            continue
-        rel = p.relative_to(plugin_dir)
-        if str(rel).startswith("vendor/"):
-            # Include vendor only if you truly ship it; most plugins should NOT.
-            continue
-        if str(rel).startswith(".git/") or str(rel).endswith(".ci_autofix.patch"):
-            continue
-        z.write(str(p), arcname=str(rel))
-print(zip_path)
+if __name__ == "__main__":
+    plugin_dir = sys.argv[1]
+    out_zip = sys.argv[2]
+    os.makedirs(os.path.dirname(out_zip), exist_ok=True)
+    zipdir(plugin_dir, out_zip)
+    print(out_zip)

@@ -25,43 +25,36 @@ def main():
     main_file = args.main_file.strip().lstrip("/")
 
     report = {"pass": True, "checks": []}
-
     phpunit_xml = os.path.join(plug, "phpunit.xml.dist")
     bootstrap = os.path.join(plug, "tests", "bootstrap.php")
     installer = os.path.join(plug, "bin", "install-wp-tests.sh")
 
-    # phpunit.xml.dist
     if not os.path.exists(phpunit_xml):
         report["pass"] = False
-        report["checks"].append({"name": "phpunit_xml", "pass": False, "reason": "missing"})
+        report["checks"].append({"name":"phpunit_xml", "pass":False, "reason":"missing"})
     else:
         s = read(phpunit_xml)
-        ok = 'bootstrap="tests/bootstrap.php"' in s or "tests/bootstrap.php" in s
-        report["checks"].append({"name": "phpunit_xml", "pass": ok, "reason": "" if ok else "does_not_reference_tests_bootstrap"})
-        if not ok:
-            report["pass"] = False
+        ok = "tests/bootstrap.php" in s
+        report["checks"].append({"name":"phpunit_xml", "pass":ok, "reason":"" if ok else "does_not_reference_tests_bootstrap"})
+        report["pass"] = report["pass"] and ok
 
-    # tests/bootstrap.php
     if not os.path.exists(bootstrap):
         report["pass"] = False
-        report["checks"].append({"name": "tests_bootstrap", "pass": False, "reason": "missing"})
+        report["checks"].append({"name":"tests_bootstrap", "pass":False, "reason":"missing"})
     else:
         s = read(bootstrap)
-        # must require the main file (relative)
-        ok = re.search(r"require\s+dirname\(__DIR__\)\s*\.\s*'/" + re.escape(main_file) + r"'\s*;", s) is not None
-        report["checks"].append({"name": "tests_bootstrap", "pass": ok, "reason": "" if ok else "does_not_require_main_plugin_file_correctly"})
-        if not ok:
-            report["pass"] = False
+        rx = re.compile(r"require\s+dirname\(__DIR__\)\s*\.\s*'/" + re.escape(main_file) + r"'\s*;")
+        ok = rx.search(s) is not None
+        report["checks"].append({"name":"tests_bootstrap", "pass":ok, "reason":"" if ok else "does_not_require_main_plugin_file_correctly"})
+        report["pass"] = report["pass"] and ok
 
-    # install-wp-tests.sh
     if not os.path.exists(installer):
         report["pass"] = False
-        report["checks"].append({"name": "install_wp_tests_sh", "pass": False, "reason": "missing"})
+        report["checks"].append({"name":"install_wp_tests_sh", "pass":False, "reason":"missing"})
     else:
-        exec_ok = is_executable(installer)
-        report["checks"].append({"name": "install_wp_tests_sh_executable", "pass": exec_ok, "reason": "" if exec_ok else "not_executable"})
-        if not exec_ok:
-            report["pass"] = False
+        ok = is_executable(installer)
+        report["checks"].append({"name":"install_wp_tests_sh_executable", "pass":ok, "reason":"" if ok else "not_executable"})
+        report["pass"] = report["pass"] and ok
 
     out = os.path.join(rep, "wp-integration.json")
     with open(out, "w", encoding="utf-8") as f:
