@@ -111,20 +111,30 @@ Rules:
 - Fix security issues first.
 
 CI evidence:
-[php-lint]
+
+Tooling setup validation (tooling.json):
+{tooling_json}
+
+Tooling run summary (tooling-run.json):
+{tooling_run}
+
+Composer validate:
+{composer_validate}
+
+PHP lint:
 {lint}
 
-[phpcs]
+PHPCS:
 {phpcs}
 
-[phpstan]
+PHPStan:
 {phpstan}
 
-[semgrep]
-{semgrep}
-
-[phpunit]
+PHPUnit:
 {phpunit}
+
+Semgrep:
+{semgrep}
 
 Repo structure: this is a WordPress plugin. Main plugin file: {args.main_file}
 """
