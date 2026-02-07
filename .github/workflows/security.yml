@@ -16,35 +16,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  codeql:
+  codeql_actions:
+    name: CodeQL (GitHub Actions)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - name: Initialize CodeQL (actions only)
+        uses: github/codeql-action/init@v4
         with:
-          languages: php, javascript
+          # IMPORTANT: hard-code the language(s); do not autodetect.
+          languages: actions
           config-file: ./.github/codeql/codeql-config.yml
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:actions"
+
+  codeql_js:
+    name: CodeQL (JS/TS)
+    runs-on: ubuntu-latest
+    # Run only if JS/TS exists
+    if: ${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL (javascript-typescript)
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:php"
-          output: sarif-out
+          category: "/language:javascript-typescript"
 
-      - name: Upload CodeQL SARIF artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sarif-codeql
-          path: sarif-out/**/*.sarif
-          if-no-files-found: warn
-
-  semgrep:
+  semgrep_php:
+    name: Semgrep (PHP) SARIF
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +65,15 @@ jobs:
           config: "p/php"
           generateSarif: "1"
         env:
+          # Optional. If you don't have this secret, remove the line below.
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload Semgrep SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-php
 
       - name: Upload Semgrep SARIF artifact
         if: always()
@@ -64,3 +82,4 @@ jobs:
           name: sarif-semgrep
           path: semgrep.sarif
           if-no-files-found: warn
+          retention-days: 7
