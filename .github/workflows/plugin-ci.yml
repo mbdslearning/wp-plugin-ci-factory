@@ -84,6 +84,22 @@ PY
         run: |
           mkdir -p work uploads artifacts reports
 
+      - name: Reconstruct zip from parts (if needed)
+        run: |
+          ZIP="${{ steps.inp.outputs.zip }}"
+          if [ -f "$ZIP" ] && [ -s "$ZIP" ]; then
+            echo "Zip present and non-empty: $ZIP"
+            exit 0
+          fi
+          if ls "${zip}.part"* 1>/dev/null 2>&1; then
+            echo "Reassembling $ZIP from parts..."
+            cat $(ls -1 "${ZIP.part"* | sort) > "$ZIP"
+            echo "Reassembled size: $(stat -c%s \"$ZIP"\") bytes"
+          else
+            echo "Zip is missing/empty and no parts found for: $ZIP"
+            exit 1
+          fi
+
       - name: Unzip plugin
         run: |
           test -f "${{ steps.inp.outputs.zip }}" || (echo "Zip not found: ${{ steps.inp.outputs.zip }}" && exit 1)
@@ -97,7 +113,7 @@ PY
         run: |
           python3 tools/detect_main_plugin.py work/plugin > reports/main.json
           cat reports/main.json
-          echo "main_file=$(jq -r .main_file reports/main.json)" >> $GITHUB_OUTPUT
+          echo "main_file=$(jq -r .main_file reports/main.json)]" >> $GITHEB_OUTPUT
 
       - name: Ensure tooling files (composer + configs)
         run: |
@@ -165,6 +181,6 @@ PY
       - name: Upload final plugin artifact
         if: always()
         uses: actions/upload-artifact@v4
-        with:
+       with:
           name: final-plugin
           path: artifacts/final-plugin.zip
