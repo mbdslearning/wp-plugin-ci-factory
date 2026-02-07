@@ -12,14 +12,14 @@ on:
         default: "."
         type: string
       php_versions:
-        description: "Comma-separated PHP versions"
+        description: "JSON array of PHP tersions (e.g. [\"8.1\",\"8.2\"])"
         required: true
-        default: "8.1,8.2,8.3"
+        default: '["8.1","8.2","8.3"]'
         type: string
       wp_versions:
-        description: "Comma-separated WordPress versions"
+        description: "JSON array of WordPress versions (e.g. [\"latest\",\"6.6\"])"
         required: true
-        default: "latest,6.4,6.5,6.6"
+        default: '["latest","6.4","6.5","6.6"]'
         type: string
       run_debug_variant:
         description: "Run WP_DEBUG/SCRIPT_DEBUG variant"
@@ -54,8 +54,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ${{ fromJSON(format('["{0}"]', join(split(inputs.php_versions, ','), '","'))) }}
-        wp:  ${{ fromJSON(format('["{0}"]', join(split(inputs.wp_versions, ','), '","'))) }}
+        php: ${{ fromJSON(github.event.inputs.php_versions || '["8.1","8.2","8.3"]') }}
+        wp:  ${{ fromJSON(github.event.inputs.wp_versions  || '["latest","6.4","6.5","6.6"]') }}
 
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,7 @@ jobs:
 
       - name: Run Gate
         env:
-          PLUGIN_SUBDIR: ${{ inputs.plugin_subdir }}
+          PLUGIN_SUBDIR: ${{ github.event.inputs.plugin_subdir || '.' }}
           WP_VERSION: ${{ matrix.wp }}
           WP_DEBUG: "0"
           SCRIPT_DEBUG: "0"
@@ -101,9 +101,10 @@ jobs:
           retention-days: 7
 
   gate_debug:
-    if: ${{ inputs.run_debug_variant == 'true' }}
+    if: ${{ (github.event.inputs.run_debug_variant || 'true') == 'true' }}
     runs-on: ubuntu-latest
     needs: [gate]
+
     services:
       mysql:
         image: mysql:8.0
@@ -116,6 +117,7 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+
     steps:
       - uses: actions/checkout@v4
       - run: |
@@ -132,7 +134,7 @@ jobs:
           sudo apt-get install -y subversion unzip jq rsync
       - name: Run Gate (Debug)
         env:
-          PLUGIN_SUBDIR: ${{ inputs.plugin_subdir }}
+          PLUGIN_SUBDIR: ${{ github.event.inputs.plugin_subdir || '.' }}
           WP_VERSION: "latest"
           WP_DEBUG: "1"
           SCRIPT_DEBUG: "1"
