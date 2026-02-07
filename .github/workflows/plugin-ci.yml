@@ -36,6 +36,22 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_test
+          MYSQL_USER: wp
+          MYSQL_PASSWORD: wp
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
 
     steps:
       - name: Checkout
@@ -96,10 +112,17 @@ PY
         run: |
           (cd work/plugin && composer install --no-interaction --no-progress --prefer-dist --no-scripts)
 
-      - name: Initialize composer tooling (dev-only)
+      - name: Ensure WP integration test scaffold
         run: |
-          python3 tools/ensure_tooling_composer.py work/plugin
-          (cd work/plugin && composer install --no-interaction --no-progress --prefer-dist --no-scripts)
+          python3 tools/ensure_wp_integration_scaffold.py work/plugin --main-file "${{ steps.main.outputs.main_file }}"
+
+      - name: Validate WP integration test scaffold
+        run: |
+          python3 tools/validate_wp_integration_scaffold.py work/plugin reports --main-file "${{ steps.main.outputs.main_file }}"
+
+      - name: Run WP integration tests
+        run: |
+          python3 tools/run_wp_integration.py work/plugin reports --wp-version "${{ steps.inp.outputs.wpver }}"
 
       - name: Run Quality Gate (produces reports/gate.json)
         run: |
