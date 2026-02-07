@@ -16,47 +16,73 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  codeql:
+  # CodeQL can NOT analyze PHP. Use it for:
+  # - GitHub Actions workflows ("actions")
+  # - JS/TS ("javascript-typescript") if your plugin has block/editor assets
+  codeql_actions:
+    name: CodeQL (GitHub Actions)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - name: Initialize CodeQL (actions)
+        uses: github/codeql-action/init@v4
         with:
-          languages: php, javascript
+          languages: actions
           config-file: ./.github/codeql/codeql-config.yml
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
-
       - name: Analyze
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
-          category: "/language:php"
-          output: sarif-out
+          category: "/language:actions"
 
-      - name: Upload CodeQL SARIF artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+  codeql_js:
+    name: CodeQL (JS/TS)
+    runs-on: ubuntu-latest
+    # Skip if no JS/TS in repo
+    if: ${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL (javascript-typescript)
+        uses: github/codeql-action/init@v4
         with:
-          name: sarif-codeql
-          path: sarif-out/**/*.sarif
-          if-no-files-found: warn
+          languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
 
-  semgrep:
+      # For interpreted languages, autobuild is optional; keep it simple:
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:javascript-typescript"
+
+  # PHP security coverage (SAST) via Semgrep SARIF
+  semgrep_php:
+    name: Semgrep (PHP) SARIF
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # Option A: Semgrep Cloud rules (recommended if you have token)
+      # Option B: OSS rulesets without token still work, just less centralized
       - name: Run Semgrep (SARIF)
         uses: returntocorp/semgrep-action@v1
         with:
           config: "p/php"
           generateSarif: "1"
         env:
+          # Optional. If you don't have this, remove the env line.
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
+      # Upload SARIF to GitHub Code Scanning UI
+      - name: Upload Semgrep SARIF to Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-php
+
+      # Also store it as a build artifact
       - name: Upload Semgrep SARIF artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -64,3 +90,4 @@ jobs:
           name: sarif-semgrep
           path: semgrep.sarif
           if-no-files-found: warn
+          retention-days: 7
