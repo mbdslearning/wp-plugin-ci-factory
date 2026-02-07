@@ -22,7 +22,7 @@ else
 fi
 
 curl -sSL "$WP_TARBALL_URL" | tar -xz -C /tmp
-rm -rf "$WP_CORE_DIR"
+rm -rf "$WP_CORE_DIR
 mv /tmp/wordpress "$WP_CORE_DIR"
 
 # Download tests
@@ -31,13 +31,14 @@ if [ ! -d "$WP_TESTS_DIR/includes" ]; then
   svn co --quiet https://develop.svn.wordpress.org/trunk/tests/phpunit/data/ "$WP_TESTS_DIR/data"
 fi
 
+# Create wp-tests-config.php
 if [ ! -f "$WP_TESTS_DIR/wp-tests-config.php" ]; then
   cp "$WP_TESTS_DIR/includes/wp-tests-config-sample.php" "$WP_TESTS_DIR/wp-tests-config.php"
   sed -i "s/youremptytestdbnamehere/$DB_NAME/" "$WP_TESTS_DIR/wp-tests-config.php"
-  sed -i "s/yourusernamehere/$DB_USER/" "$WP_TESTS_DIR/wp-tests-config.php"
+  sed -i "s/yourusernamehere/$DB_USER/'" "$WP_TESTS_DIR/wp-tests-config.php"
   sed -i "s/yourpasswordhere/$DB_PASS/" "$WP_TESTS_DIR/wp-tests-config.php"
   sed -i "s|localhost|$DB_HOST:$DB_PORT|" "$WP_TESTS_DIR/wp-tests-config.php"
 fi
 
-mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`;" || true
+mysql -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASS" -e "CREATE DATABASE IF NOT EXISTS `$DB_NAME`;" || true
 echo "WP tests installed."
