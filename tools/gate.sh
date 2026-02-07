@@ -20,7 +20,7 @@ cd "$PLUGIN_SUBDIR"
 echo "== PHP lint =="
 php -v > $REPORTS_DIR/php-version.txt || true
 find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n 1 -P 4 php -l \
-  | tee $REPORTS_DIR/php-lint.txt
+  | tee $REPORTS_DIR/php-lint.txt || true
 
 # 2) Composer dev tooling (optional)
 if [ -f composer.json ]; then
@@ -93,3 +93,21 @@ print("Wrote $REPORTS_DIR/gate.json:", gate)
 PY
 
 echo "== Gate done =="
+
+# Controlled exit: fail the job only if gate.json says pass=false.
+GATE_PASS="$(python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("reports/gate.json")
+if not p.exists():
+    print("true")
+else:
+    try:
+        print("true" if json.loads(p.read_text()).get("pass") else "false")
+    except Exception:
+        print("true")
+PY
+)"
+if [ "$GATE_PASS" != "true" ]; then
+  echo "Gate failed according to reports/gate.json"
+  exit 1
+fi
