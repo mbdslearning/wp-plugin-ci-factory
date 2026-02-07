@@ -37,8 +37,7 @@ jobs:
   codeql_js:
     name: CodeQL (JS/TS)
     runs-on: ubuntu-latest
-    # Run only if JS/TS exists
-    if: ${{ hashFiles('**/*.js', '**/*.jsx', '**/*.ts', '**/*.tsx') != '' }}
+    # Note: we run unconditionally because `hashFiles()` is not supported in job-level `    # if:` in some contexts.
     steps:
       - uses: actions/checkout@v4
 
@@ -65,8 +64,8 @@ jobs:
           config: "p/php"
           generateSarif: "1"
         env:
-          # Optional. If you don't have this secret, remove the line below.
-          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+          # Optional: Semgrep App token. Runs in OSS mode when empty/missing.
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN || '' }}
 
       - name: Upload Semgrep SARIF to Code Scanning
         if: always()
