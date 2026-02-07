@@ -51,6 +51,15 @@ def run_tooling(plugin_dir: str, reports_dir: str) -> None:
     # Writes reports/tooling-run.json + raw outputs
     run(["python3", "tools/run_tooling.py", plugin_dir, reports_dir], os.getcwd())
 
+def ensure_wp_integration(plugin_dir: str, main_file: str) -> None:
+    run(["python3", "tools/ensure_wp_integration_scaffold.py", plugin_dir, "--main-file", main_file], os.getcwd())
+
+def validate_wp_integration(plugin_dir: str, reports_dir: str, main_file: str) -> None:
+    run(["python3", "tools/validate_wp_integration_scaffold.py", plugin_dir, reports_dir, "--main-file", main_file], os.getcwd())
+
+def run_wp_integration(plugin_dir: str, reports_dir: str, wp_version: str) -> None:
+    run(["python3", "tools/run_wp_integration.py", plugin_dir, reports_dir, "--wp-version", wp_version], os.getcwd())
+
 def apply_patch(plugin_dir: str, patch_text: str) -> None:
     patch_path = os.path.join(plugin_dir, ".ci_autofix.patch")
     write(patch_path, patch_text + "\n")
@@ -84,6 +93,9 @@ def main():
         ensure_tooling(plug)
         validate_tooling(plug, rep)
         run_tooling(plug, rep)
+        ensure_wp_integration(plug, args.main_file)
+        validate_wp_integration(plug, rep, args.main_file)
+        run_wp_integration(plug, rep, args.wp_version)
 
         g = json.loads(read(os.path.join(rep, "gate.json"))) if os.path.exists(os.path.join(rep,"gate.json")) else gate(plug, rep, args.wp_version, args.main_file)
         if g.get("summary",{}).get("pass") is True:
@@ -100,6 +112,9 @@ def main():
         phpstan = read(os.path.join(rep, "phpstan.txt"))[:12000]
         phpunit = read(os.path.join(rep, "phpunit.txt"))[:12000]
         semgrep = read(os.path.join(rep, "semgrep.txt"))[:12000]
+        wp_integration = read(os.path.join(rep, "wp-integration.json"))[:12000]
+        wp_integration_run = read(os.path.join(rep, "wp-integration-run.json"))[:12000]
+        wp_tests_install = read(os.path.join(rep, "wp-tests-install.txt"))[:12000]
 
         prompt = f"""
 You are a senior WordPress plugin engineer. Produce a SINGLE unified diff patch that fixes issues.
@@ -132,6 +147,15 @@ PHPStan:
 
 PHPUnit:
 {phpunit}
+
+wp-integration scaffold validation:
+{wp_integration}
+
+wp-integration run summary:
+{wp_integration_run}
+
+wp-tests install log:
+{wp_tests_install}
 
 Semgrep:
 {semgrep}
