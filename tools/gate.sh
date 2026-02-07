@@ -14,7 +14,7 @@ mkdir -p "$REPORTS_DIR"
 echo "== Gate: plugin_subdir=$PLUGIN_SUBDIR wp=$WP_VERSION =="
 echo "WP_DEBUG=$WP_DEBUG SCRIPT_DEBUG=$SCRIPT_DEBUG"
 
-cd "$PLUGIN_SUBDIR2
+cd "$PLUGIN_SUBDIR"
 
 # 1) PHP lint
 echo "== PHP lint =="
@@ -46,7 +46,7 @@ fi
 
 # 5) WP Integration tests (PHPUnit)
 echo "== WP Tests install =="
-chmod +x ../bin/install-wp-tests.sh
+chmod +x "$REPO_ROOT/bin/install-wp-tests.sh"
 WP_TESTS_DIR="/tmp/wordpress-tests-lib"
 WP_CORE_DIR="/tmp/wordpress"
 export WP_TESTS_DIR WP_CORE_DIR
@@ -59,7 +59,7 @@ export WP_VERSION
 export WP_DEBUG SCRIPT_DEBUG
 export PLUGIN_DIR="$(pwd)"
 
-../bin/install-wp-tests.sh | tee $REPORTS_DIR/wp-tests-install.txt || true
+"$REPO_ROOT/bin/install-wp-tests.sh" | tee $REPORTS_DIR/wp-tests-install.txt || true
 
 echo "== PHPUnit =="
 if [ -f phpunit.xml.dist ]; then
