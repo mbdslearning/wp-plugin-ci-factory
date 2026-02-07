@@ -7,6 +7,9 @@ def run(cmd, cwd, timeout=1800):
 def read(p):
     return open(p, "r", encoding="utf-8", errors="ignore").read() if os.path.exists(p) else ""
 
+def read_clip(path: str, limit: int = 12000) -> str:
+    return read(path)[:limit]
+
 def write(p, s):
     os.makedirs(os.path.dirname(p), exist_ok=True)
     open(p, "w", encoding="utf-8").write(s)
@@ -93,6 +96,7 @@ def main():
         ensure_tooling(plug)
         validate_tooling(plug, rep)
         run_tooling(plug, rep)
+        
         ensure_wp_integration(plug, args.main_file)
         validate_wp_integration(plug, rep, args.main_file)
         run_wp_integration(plug, rep, args.wp_version)
@@ -103,18 +107,19 @@ def main():
             return
 
         # Build a compact “evidence bundle”
-        tooling_json = read(os.path.join(rep, "tooling.json"))[:12000]
-        tooling_run = read(os.path.join(rep, "tooling-run.json"))[:12000]
-        composer_validate = read(os.path.join(rep, "composer-validate.txt"))[:12000]
+        tooling_json = read_clip(os.path.join(rep, "tooling.json"))
+        tooling_run = read_clip(os.path.join(rep, "tooling-run.json"))
+        composer_validate = read_clip(os.path.join(rep, "composer-validate.txt"))
+
+        lint = read_clip(os.path.join(rep, "php-lint.txt"))
+        phpcs = read_clip(os.path.join(rep, "phpcs.txt"))
+        phpstan = read_clip(os.path.join(rep, "phpstan.txt"))
+        phpunit = read_clip(os.path.join(rep, "phpunit.txt"))
+        semgrep = read_clip(os.path.join(rep, "semgrep.txt"))
         
-        lint = read(os.path.join(rep, "php-lint.txt"))[:12000]
-        phpcs = read(os.path.join(rep, "phpcs.txt"))[:12000]
-        phpstan = read(os.path.join(rep, "phpstan.txt"))[:12000]
-        phpunit = read(os.path.join(rep, "phpunit.txt"))[:12000]
-        semgrep = read(os.path.join(rep, "semgrep.txt"))[:12000]
-        wp_integration = read(os.path.join(rep, "wp-integration.json"))[:12000]
-        wp_integration_run = read(os.path.join(rep, "wp-integration-run.json"))[:12000]
-        wp_tests_install = read(os.path.join(rep, "wp-tests-install.txt"))[:12000]
+        wp_integration = read_clip(os.path.join(rep, "wp-integration.json"))
+        wp_integration_run = read_clip(os.path.join(rep, "wp-integration-run.json"))
+        wp_tests_install = read_clip(os.path.join(rep, "wp-tests-install.txt"))
 
         prompt = f"""
 You are a senior WordPress plugin engineer. Produce a SINGLE unified diff patch that fixes issues.
