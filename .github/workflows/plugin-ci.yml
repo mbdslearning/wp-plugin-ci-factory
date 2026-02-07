@@ -1,10 +1,10 @@
-name: WP Plugin Comprehensive Gate (with optional autofix)
+name: WP Plugin Comprehensive Gate (chunked upload + optional autofix)
 
 on:
   workflow_dispatch:
     inputs:
       plugin_zip_path:
-        description: "Path in repo to plugin zip (e.g. uploads/plugin.zip)"
+        description: "Path in repo to plugin zip (default: uploads/plugin.zip). If chunked parts exist, workflow will assemble first."
         required: true
         default: "uploads/plugin.zip"
         type: string
@@ -14,7 +14,7 @@ on:
         default: "3"
         type: string
       php_matrix:
-        description: "Comma-separated PHP versions"
+        description: "Comma-separated PHP versions (informational unless you add matrix strategy)"
         required: true
         default: "8.1,8.2,8.3"
         type: string
@@ -23,8 +23,8 @@ on:
         required: true
         default: "latest"
         type: string
-      debug_variants:
-        description: "Run debug variant job (WP_DEBUG=1 & SCRIPT_DEBUG=1) (true/false)"
+      run_debug_variant:
+        description: "Also run debug variant (WP_DEBUG=1, SCRIPT_DEBUG=1)"
         required: true
         default: "true"
         type: string
@@ -49,12 +49,10 @@ jobs:
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: wordpress_test
-          MYSQL_USER: wp
-          MYSQL_PASSWORD: wp
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -63,39 +61,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Parse inputs
-        id: inp
-        shell: bash
-        run: |
-          echo "zip=${{ inputs.plugin_zip_path }}" >> $GITHUB_OUTPUT
-          echo "maxit=${{ inputs.max_iterations }}" >> $GITHUB_OUTPUT
-          echo "wpver=${{ inputs.wp_version }}" >> $GITHUB_OUTPUT
-          echo "debug=${{ inputs.debug_variants }}" >> $GITHUB_OUTPUT
-          php_csv="${{ inputs.php_matrix }}"
-          php_json=$(python3 - << 'PY'
-import os, json
-csv = os.environ["PHP_CSV"]
-arr = [x.strip() for x in csv.split(",") if x.strip()]
-print(json.dumps(arr))
-PY
-          )
-          echo "php_json=$php_json" >> $GITHUB_OUTPUT
-        env:
-          PHP_CSV: ${{ inputs.php_matrix }}
-
       - name: Install OS deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip subversion jq
+          sudo apt-get install -y unzip subversion jq rsync
 
       - name: Prepare workspace
         run: |
           mkdir -p work uploads artifacts reports
 
+      - name: Assemble plugin zip from parts (if needed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ls uploads/plugin.zip.part* 1> /dev/null 2>&1; then
+            echo "Found chunked zip parts. Reassembling to uploads/plugin.zip..."
+            rm -f uploads/plugin.zip
+            cat uploads/plugin.zip.part* > uploads/plugin.zip
+            ls -lh uploads/plugin.zip
+          else
+            echo "No zip parts found. Using plugin zip path as-is."
+          fi
+
+      - name: Validate plugin zip exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${{ inputs.plugin_zip_path }}" || (echo "Zip not found: ${{ inputs.plugin_zip_path }}" && exit 1)
+          ls -lh "${{ inputs.plugin_zip_path }}"
+
       - name: Unzip plugin
         run: |
-          test -f "${{ steps.inp.outputs.zip }}" || (echo "Zip not found: ${{ steps.inp.outputs.zip }}" && exit 1)
-          unzip -q "${{ steps.inp.outputs.zip }}" -d work/plugin
+          unzip -q "${{ inputs.plugin_zip_path }}" -d work/plugin
           python3 tools/flatten_plugin_dir.py work/plugin
           ls -la work/plugin
 
@@ -106,32 +103,36 @@ PY
           cat reports/main.json
           echo "main_file=$(jq -r .main_file reports/main.json)" >> $GITHUB_OUTPUT
 
-      - name: Ensure dev tooling (composer/phpcs/phpstan/phpunit)
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer:v2
+          coverage: none
+
+      - name: Initialize composer tooling (dev-only)
         run: |
           python3 tools/ensure_tooling_composer.py work/plugin
-
-      - name: Install composer deps (dev-only)
-        run: |
           (cd work/plugin && composer install --no-interaction --no-progress --prefer-dist --no-scripts)
 
-      - name: Ensure WP integration scaffold
+      - name: Ensure WP integration scaffold exists
         run: |
           python3 tools/ensure_wp_integration_scaffold.py work/plugin --main-file "${{ steps.main.outputs.main_file }}"
 
-      - name: Validate WP integration scaffold
-        run: |
-          python3 tools/validate_wp_integration_scaffold.py work/plugin reports --main-file "${{ steps.main.outputs.main_file }}"
-
-      - name: Run WP integration tests (normal)
+      - name: Run Quality Gate (produces reports/gate.json)
         env:
+          WP_VERSION: "${{ inputs.wp_version }}"
           WP_DEBUG: "0"
           SCRIPT_DEBUG: "0"
+          DB_HOST: "127.0.0.1"
+          DB_NAME: "wordpress_test"
+          DB_USER: "root"
+          DB_PASS: "root"
+          DB_PORT: "3306"
         run: |
-          python3 tools/run_wp_integration.py work/plugin reports --wp-version "${{ steps.inp.outputs.wpver }}"
-
-      - name: Run Quality Gate (produces reports/gate.json)
-        run: |
-          python3 tools/run_gate.py work/plugin reports             --wp-version "${{ steps.inp.outputs.wpver }}"             --main-file "${{ steps.main.outputs.main_file }}"
+          python3 tools/run_gate.py work/plugin reports \
+            --wp-version "${{ inputs.wp_version }}" \
+            --main-file "${{ steps.main.outputs.main_file }}"
 
       - name: Upload reports artifact
         if: always()
@@ -141,12 +142,24 @@ PY
           path: reports
 
       - name: Auto-fix loop (optional)
-        if: ${{ steps.inp.outputs.maxit != '0' }}
+        if: ${{ inputs.max_iterations != '0' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_MODEL: ${{ secrets.OPENAI_MODEL }}
+          WP_VERSION: "${{ inputs.wp_version }}"
+          WP_DEBUG: "0"
+          SCRIPT_DEBUG: "0"
+          DB_HOST: "127.0.0.1"
+          DB_NAME: "wordpress_test"
+          DB_USER: "root"
+          DB_PASS: "root"
+          DB_PORT: "3306"
         run: |
-          python3 tools/auto_fix_loop.py             --plugin-dir work/plugin             --reports-dir reports             --max-it "${{ steps.inp.outputs.maxit }}"             --wp-version "${{ steps.inp.outputs.wpver }}"             --main-file "${{ steps.main.outputs.main_file }}"
+          python3 tools/auto_fix_loop.py \
+            --plugin-dir work/plugin \
+            --reports-dir reports \
+            --max-it "${{ inputs.max_iterations }}" \
+            --wp-version "${{ inputs.wp_version }}" \
+            --main-file "${{ steps.main.outputs.main_file }}"
 
       - name: Package final plugin zip
         if: always()
@@ -161,8 +174,9 @@ PY
           path: artifacts/final-plugin.zip
 
   gate_debug:
-    if: ${{ inputs.debug_variants == 'true' }}
+    if: ${{ inputs.run_debug_variant == 'true' }}
     runs-on: ubuntu-latest
+    needs: [gate]
 
     services:
       mysql:
@@ -170,12 +184,10 @@ PY
         env:
           MYSQL_ROOT_PASSWORD: root
           MYSQL_DATABASE: wordpress_test
-          MYSQL_USER: wp
-          MYSQL_PASSWORD: wp
         ports:
           - 3306:3306
         options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
@@ -187,51 +199,77 @@ PY
       - name: Install OS deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y unzip subversion jq
+          sudo apt-get install -y unzip subversion jq rsync
 
       - name: Prepare workspace
         run: |
           mkdir -p work uploads artifacts reports
 
+      - name: Assemble plugin zip from parts (if needed)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ls uploads/plugin.zip.part* 1> /dev/null 2>&1; then
+            echo "Found chunked zip parts. Reassembling to uploads/plugin.zip..."
+            rm -f uploads/plugin.zip
+            cat uploads/plugin.zip.part* > uploads/plugin.zip
+            ls -lh uploads/plugin.zip
+          else
+            echo "No zip parts found. Using plugin zip path as-is."
+          fi
+
+      - name: Validate plugin zip exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${{ inputs.plugin_zip_path }}" || (echo "Zip not found: ${{ inputs.plugin_zip_path }}" && exit 1)
+          ls -lh "${{ inputs.plugin_zip_path }}"
+
       - name: Unzip plugin
         run: |
-          test -f "${{ inputs.plugin_zip_path }}" || (echo "Zip not found: ${{ inputs.plugin_zip_path }}" && exit 1)
           unzip -q "${{ inputs.plugin_zip_path }}" -d work/plugin
           python3 tools/flatten_plugin_dir.py work/plugin
+          ls -la work/plugin
 
       - name: Detect main plugin file
         id: main
         run: |
           python3 tools/detect_main_plugin.py work/plugin > reports/main.json
+          cat reports/main.json
           echo "main_file=$(jq -r .main_file reports/main.json)" >> $GITHUB_OUTPUT
 
-      - name: Ensure dev tooling (composer/phpcs/phpstan/phpunit)
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer:v2
+          coverage: none
+
+      - name: Initialize composer tooling (dev-only)
         run: |
           python3 tools/ensure_tooling_composer.py work/plugin
-
-      - name: Install composer deps (dev-only)
-        run: |
           (cd work/plugin && composer install --no-interaction --no-progress --prefer-dist --no-scripts)
 
-      - name: Ensure WP integration scaffold
+      - name: Ensure WP integration scaffold exists
         run: |
           python3 tools/ensure_wp_integration_scaffold.py work/plugin --main-file "${{ steps.main.outputs.main_file }}"
 
-      - name: Run WP integration tests (debug)
+      - name: Run Quality Gate (DEBUG VARIANT)
         env:
+          WP_VERSION: "${{ inputs.wp_version }}"
           WP_DEBUG: "1"
           SCRIPT_DEBUG: "1"
+          DB_HOST: "127.0.0.1"
+          DB_NAME: "wordpress_test"
+          DB_USER: "root"
+          DB_PASS: "root"
+          DB_PORT: "3306"
         run: |
-          python3 tools/run_wp_integration.py work/plugin reports --wp-version "${{ inputs.wp_version }}"
+          python3 tools/run_gate.py work/plugin reports \
+            --wp-version "${{ inputs.wp_version }}" \
+            --main-file "${{ steps.main.outputs.main_file }}"
 
-      - name: Run Quality Gate (debug flags)
-        env:
-          WP_DEBUG: "1"
-          SCRIPT_DEBUG: "1"
-        run: |
-          python3 tools/run_gate.py work/plugin reports             --wp-version "${{ inputs.wp_version }}"             --main-file "${{ steps.main.outputs.main_file }}"
-
-      - name: Upload reports artifact (debug)
+      - name: Upload debug reports artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
